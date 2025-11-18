@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Digipädevuse kalapüügimäng</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css" />
+  <style>
+    body {
+      background: linear-gradient(#4fc3f7, #01579b);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      overflow: hidden;
+    }
+    #game {
+      text-align: center;
+      max-width: 640px;
+      width: 94%;
+      position: relative;
+    }
+    #fish {
+      font-size: 90px;
+      cursor: pointer;
+      opacity: 0.5;
+      transition: transform 0.3s, opacity 0.3s;
+      z-index: 1;
+      user-select: none;
+    }
+    #fish.active {
+      opacity: 1;
+      transform: scale(1.2) rotate(3deg);
+    }
+    .confetti-piece {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: white;
+      animation: fall 1s linear forwards;
+      pointer-events: none;
+      border-radius: 2px;
+    }
+    @keyframes fall {
+      from { opacity: 1; transform: translateY(0) rotate(0deg); }
+      to { opacity: 0; transform: translateY(200px) rotate(360deg); }
+    }
+    #questionScreen, #endScreen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.85);
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      border-radius: 10px;
+      z-index: 5;
+    }
+    #answerButtons .button { min-width: 160px; }
+  </style>
+</head>
+<body>
+
+  <!-- Sounds -->
+  <audio id="ding" src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_37b04a5a0b.mp3?filename=correct-2-46134.mp3"></audio>
+  <audio id="wrong" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_2e21efd5b9.mp3?filename=error-126627.mp3"></audio>
+  <audio id="pop" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_d2ddb3f7e3.mp3?filename=click-124467.mp3"></audio>
+  <audio id="music" src="https://cdn.pixabay.com/download/audio/2022/10/11/audio_8c6ef08f66.mp3?filename=happy-kids-ambient-ambient-music-for-children-121349.mp3" loop></audio>
+
+  <div id="game" class="box has-background-info-dark">
+    <h1 class="title has-text-white">🎣 Digipädevuse Kalapüük</h1>
+    <p id="hint">Oota, kuni kala jääb õnge otsa. Vajuta õngele, et vastata küsimusele!</p>
+
+    <!-- õnge/ikon -->
+    <div id="fish" aria-hidden="true">🎣</div>
+
+    <!-- täisekraan küsimuste jaoks -->
+    <div id="questionScreen">
+      <p id="questionText" class="has-text-white mb-3" style="font-size: 1.4rem;"></p>
+      <div id="answerButtons" class="buttons"></div>
+    </div>
+
+    <!-- lõpu ekraan -->
+    <div id="endScreen">
+      <h1 class="title has-text-white">Mäng läbi!</h1>
+      <p class="subtitle has-text-white">Skoor: <span id="finalScore"></span></p>
+      <!-- fixed reload: assign href (no function call) -->
+      <button class="button is-primary" onclick="window.location.href = window.location.href">Mängi uuesti</button>
+    </div>
+  </div>
+
+  <h2 class="subtitle mt-4">Punktid: <span id="score">0</span></h2>
+
+  <script>
+    // Elements
+    const fish = document.getElementById("fish");
+    const questionScreen = document.getElementById("questionScreen");
+    const questionText = document.getElementById("questionText");
+    const answerButtons = document.getElementById("answerButtons");
+    const scoreDisplay = document.getElementById("score");
+    const endScreen = document.getElementById("endScreen");
+    const finalScore = document.getElementById("finalScore");
+
+    const ding = document.getElementById("ding");
+    const wrong = document.getElementById("wrong");
+    const pop = document.getElementById("pop");
+    const music = document.getElementById("music");
+
+    // Try to play music (might be blocked until user interaction)
+    music.volume = 0.35;
+    const tryPlayMusic = () => { music.play().catch(()=>{}); };
+    document.addEventListener('click', tryPlayMusic, { once: true });
+
+    // State
+    let score = 0;
+    let fishReady = false;   // whether a bite is currently happening
+    let inQuestion = false;  // whether question screen is open
+
+    // Questions (larger pool)
+    let questions = [
+      { q: "Mis on tugev parool?", a: ["Nimi + sünniaasta", "123456", "Pikk, eri sümbolitega parool"], correct: 2 },
+      { q: "Mis on 2FA?", a: ["Kahe parooli sisestamine", "Lisaturvalisus teise seadmega", "Wifi parool"], correct: 1 },
+      { q: "Mis on VPN?", a: ["IP-d peitev turvakanal", "Wifi kordaja", "Failide kustutaja"], correct: 0 },
+      { q: "Mis on phishing?", a: ["Andmepetukiri", "Kala püük", "Tarkvara uuendus"], correct: 0 },
+      { q: "Mis on digijälg?", a: ["Internetis maha jääv info", "IP aadress", "Jälg lumel"], correct: 0 },
+      { q: "Mida teha kahtlase lingiga?", a: ["Avada", "Jätta avamata ja kontrollida", "Saata sõbrale"], correct: 1 },
+      { q: "Miks uuendada tarkvara?", a: ["Turvalisus paranduste tõttu", "Et reklaame saada", "Selleks, et aeglustada seadet"], correct: 0 },
+      { q: "Mis on küberturvalisus?", a: ["Digitaalse info kaitse", "Arvutimängude tegemine", "Failide kustutamine"], correct: 0 },
+      { q: "Mis aitab kaitsta kontot?", a: ["Lihtne parool", "Kaheastmeline autentimine", "Parooli jagamine"], correct: 1 },
+      { q: "Mis on andmete varundamine?", a: ["Failide backup ja taastamine", "Uute piltide tegemine", "Sõprade kutsumine"], correct: 0 }
+    ];
+
+    // Utility: pick random fish emoji and size
+    const fishTypes = ["🐟","🐠","🐡","🐙","🦐","🦑"];
+    function randomFishEmoji() { return fishTypes[Math.floor(Math.random()*fishTypes.length)]; }
+    function randomFishSize() { return 64 + Math.floor(Math.random()*48); } // font-size px
+
+    // Confetti
+    function spawnConfetti() {
+      for (let i = 0; i < 24; i++) {
+        const piece = document.createElement('div');
+        piece.className = 'confetti-piece';
+        piece.style.left = (20 + Math.random()*60) + '%';
+        piece.style.top = '0px';
+        piece.style.width = (6 + Math.random()*10) + 'px';
+        piece.style.height = piece.style.width;
+        piece.style.background = `hsl(${Math.random()*360}, 90%, 60%)`;
+        document.body.appendChild(piece);
+        setTimeout(()=> piece.remove(), 1200);
+      }
+    }
+
+    // Bite logic: fish becomes "ready" for a short time; user can click it
+    function startBite() {
+      if (inQuestion) return; // don't start a bite while answering
+      fishReady = true;
+      // randomize look
+      fish.textContent = randomFishEmoji();
+      fish.style.fontSize = randomFishSize() + 'px';
+      fish.classList.add('active');
+      pop.play().catch(()=>{});
+
+      // allow bite for 3 seconds
+      setTimeout(() => {
+        if (fishReady) {
+          fishReady = false;
+          fish.classList.remove('active');
+        }
+      }, 3000);
+    }
+
+    // Randomized loop for bites: wait between 2s and 8s before each bite
+    let biteTimer = null;
+    function scheduleNextBite(minMs=2000, maxMs=8000) {
+      clearTimeout(biteTimer);
+      const t = Math.random()*(maxMs-minMs)+minMs;
+      biteTimer = setTimeout(() => { startBite(); scheduleNextBite(); }, t);
+    }
+
+    // End game screen
+    function endGame() {
+      finalScore.textContent = score;
+      endScreen.style.display = 'flex';
+      // stop further bites
+      clearTimeout(biteTimer);
+    }
+
+    // Show question (no repetition)
+    function askQuestion() {
+      if (questions.length === 0) { endGame(); return; }
+      inQuestion = true; // block animations & new bites while answering
+      // pull random question and remove from pool
+      const idx = Math.floor(Math.random()*questions.length);
+      const q = questions.splice(idx,1)[0];
+
+      questionText.textContent = q.q;
+      answerButtons.innerHTML = '';
+
+      q.a.forEach((ans, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'button is-light';
+        btn.textContent = ans;
+        btn.onclick = () => {
+          pop.play().catch(()=>{});
+          // reveal result
+          if (i === q.correct) {
+            ding.play().catch(()=>{});
+            spawnConfetti();
+            // reward by random weight value (more exciting than +1)
+            const weight = Math.floor(Math.random()*8)+1; // 1..8
+            score += weight;
+            scoreDisplay.textContent = score;
+          } else {
+            wrong.play().catch(()=>{});
+            // show correct answer briefly before closing
+            alert('Õige vastus: ' + q.a[q.correct]);
+          }
+
+          // close question screen and allow new bites after short delay
+          questionScreen.style.display = 'none';
+          inQuestion = false;
+          // schedule next bite slightly later so it doesn't happen immediately
+          scheduleNextBite(1200, 5000);
+        };
+        answerButtons.appendChild(btn);
+      });
+
+      questionScreen.style.display = 'flex';
+    }
+
+    // Click handler on the fish/õng
+    fish.addEventListener('click', () => {
+      if (!fishReady || inQuestion) return;
+      fishReady = false;
+      fish.classList.remove('active');
+      // stop existing bite timer so it doesn't restart immediately
+      clearTimeout(biteTimer);
+      askQuestion();
+    });
+
+    // Start the first bite scheduling
+    scheduleNextBite();
+
+    // Defensive: stop timers on page unload
+    window.addEventListener('beforeunload', () => clearTimeout(biteTimer));
+  </script>
+</body>
+</html>
